@@ -3,7 +3,7 @@ import yaml
 import numpy as np
 import tensorflow as tf
 
-from rnn_utils import DeviceCellWrapper
+from model.rnn_utils import DeviceCellWrapper
 
 class ProteinRNN:
     def __init__(self, session=None, name='ProteinRNN', param_file='model/params.yml'):
