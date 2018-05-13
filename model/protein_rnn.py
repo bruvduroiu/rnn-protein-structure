@@ -3,6 +3,8 @@ import yaml
 import numpy as np
 import tensorflow as tf
 
+from rnn_utils import DeviceCellWrapper
+
 class ProteinRNN:
     def __init__(self, session=None, name='ProteinRNN', param_file='model/params.yml'):
         self.name = name
@@ -46,26 +48,30 @@ class ProteinRNN:
 
             with tf.name_scope('CNN_Cascade'):
                 # Conv Block 1: [3 x 50] kernel size
-                self.conv1 = tf.layers.conv2d(X_in, **self.params['conv1'])
-                self.conv1_transpose = tf.transpose(self.conv1, perm=[0,2,1,3])
-                self.conv1_reshape = tf.reshape(self.conv1_transpose, [-1, 700, 64])
-                self.conv1_bn = tf.layers.batch_normalization(self.conv1_reshape)
+                with tf.device('/gpu:0'):
+                    self.conv1 = tf.layers.conv2d(X_in, **self.params['conv1'])
+                    self.conv1_transpose = tf.transpose(self.conv1, perm=[0,2,1,3])
+                    self.conv1_reshape = tf.reshape(self.conv1_transpose, [-1, 700, 64])
+                    self.conv1_bn = tf.layers.batch_normalization(self.conv1_reshape)
 
                 # Conv Block 2: [7 x 50 kernel size]
-                self.conv2 = tf.layers.conv2d(X_in, **self.params['conv2'])
-                self.conv2_transpose = tf.transpose(self.conv2, perm=[0,2,1,3])
-                self.conv2_reshape = tf.reshape(self.conv2_transpose, [-1, 700, 64])
-                self.conv2_bn = tf.layers.batch_normalization(self.conv2_reshape)
+                with tf.device('/gpu:1'):
+                    self.conv2 = tf.layers.conv2d(X_in, **self.params['conv2'])
+                    self.conv2_transpose = tf.transpose(self.conv2, perm=[0,2,1,3])
+                    self.conv2_reshape = tf.reshape(self.conv2_transpose, [-1, 700, 64])
+                    self.conv2_bn = tf.layers.batch_normalization(self.conv2_reshape)
 
                 # Conv Block 3: [11 x 50 kernel size]
-                self.conv3 = tf.layers.conv2d(X_in, **self.params['conv3'])
-                self.conv3_transpose = tf.transpose(self.conv3, perm=[0,2,1,3])
-                self.conv3_reshape = tf.reshape(self.conv2_transpose, [-1, 700, 64])
-                self.conv3_bn = tf.layers.batch_normalization(self.conv3_reshape)
+                with tf.device('/gpu:2'):
+                    self.conv3 = tf.layers.conv2d(X_in, **self.params['conv3'])
+                    self.conv3_transpose = tf.transpose(self.conv3, perm=[0,2,1,3])
+                    self.conv3_reshape = tf.reshape(self.conv2_transpose, [-1, 700, 64])
+                    self.conv3_bn = tf.layers.batch_normalization(self.conv3_reshape)
 
                 # Concatenate CNNs & apply batch norm
                 self.concat_cnn = tf.concat([self.conv1_bn, self.conv2_bn, self.conv3_bn], axis=2)
                 self.concat_cnn_bn = tf.layers.batch_normalization(self.concat_cnn)
+                self.concat_cnn_bn_r = tf.reverse(self.concat_cnn_bn, axis=[1])
 
             # Placeholder for dynamic Dropout (on during training, off during testing)
             self.gru_keep_prob = tf.placeholder_with_default(1.0, shape=())
@@ -73,49 +79,64 @@ class ProteinRNN:
             # Bi-directional GRU Block1
             with tf.name_scope('GRU_Block1'):
                 gru_layer_1 = tf.contrib.rnn.GRUCell(**self.params['gru_layer1'])
-                gru_layer_1_drop = tf.contrib.rnn.DropoutWrapper(gru_layer_1, 
-                                                                 input_keep_prob=self.gru_keep_prob)
-                with tf.name_scope('fwd') as fwd_scope:
-                    self.fwd1_out, _ = tf.nn.dynamic_rnn(gru_layer_1_drop, self.concat_cnn_bn,
+
+                # Map forward and backward GRUs onto different devices
+                with tf.name_scope('fwd') as fwd_scope, tf.device('/gpu:0') as device:
+                    gru_fwd_1 = DeviceCellWrapper(device, gru_layer_1, scope=fwd_scope)
+                    gru_fwd_1_drop = tf.contrib.rnn.DropoutWrapper(gru_fwd_1, 
+                                                                   input_keep_prob=self.gru_keep_prob)
+                    self.fwd1_out, _ = tf.nn.dynamic_rnn(gru_fwd_1_drop, self.concat_cnn_bn,
                                                          dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
-                with tf.name_scope('bwd') as bwd_scope:
-                    concat_cnn_bn_r = tf.reverse(self.concat_cnn_bn, axis=[1])
-                    bwd1_out_r, _ = tf.nn.dynamic_rnn(gru_layer_1_drop, concat_cnn_bn_r, dtype=tf.float32,
-                                                      scope=bwd_scope)
+                with tf.name_scope('bwd') as bwd_scope, tf.device('/gpu:1') as device:
+                    gru_bwd_1 = DeviceCellWrapper(device, gru_layer_1, scope=bwd_scope)
+                    gru_bwd_1_drop = tf.contrib.rnn.DropoutWrapper(gru_bwd_1,
+                                                                   input_keep_prob=self.gru_keep_prob)
+                    bwd1_out_r, _ = tf.nn.dynamic_rnn(gru_bwd_1_drop, self.concat_cnn_bn_r,
+                                                      dtype=tf.float32, scope=bwd_scope)
                     # Reverse to match fwd1_out
                     self.bwd1_out = tf.reverse(bwd1_out_r, axis=[1])
                 self.bgru1 = tf.concat([self.fwd1_out, self.bwd1_out], axis=2)
+                self.bgru1_r = tf.reverse(self.bgru1, axis=[1])
 
             # Bi-directional GRU Block2
             with tf.name_scope('GRU_Block2'):
                 gru_layer_2 = tf.contrib.rnn.GRUCell(**self.params['gru_layer2'])
-                gru_layer_2_drop = tf.contrib.rnn.DropoutWrapper(gru_layer_2, 
-                                                                input_keep_prob=self.gru_keep_prob)
-                with tf.name_scope('fwd') as fwd_scope:
-                    self.fwd2_out, _ = tf.nn.dynamic_rnn(gru_layer_2_drop, self.bgru1,
+
+                with tf.name_scope('fwd') as fwd_scope, tf.device('/gpu:0') as device:
+                    gru_fwd_2 = DeviceCellWrapper(device, gru_layer_2, scope=fwd_scope)
+                    gru_fwd_2_drop = tf.contrib.rnn.DropoutWrapper(gru_fwd_2,
+                                                                   input_keep_prob=self.gru_keep_prob)
+                    self.fwd2_out, _ = tf.nn.dynamic_rnn(gru_fwd_2_drop, self.bgru1,
                                                          dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
-                with tf.name_scope('bwd') as bwd_scope:
-                    bgru1_r = tf.reverse(self.bgru1, axis=[1])
-                    bwd2_out_r, _ = tf.nn.dynamic_rnn(gru_layer_2_drop, bgru1_r, dtype=tf.float32,
-                                                      scope=bwd_scope)
-                    # Reverse to match fwd1_out
+                with tf.name_scope('bwd') as bwd_scope, tf.device('/gpu:1') as device:
+                    gru_bwd_2 = DeviceCellWrapper(device, gru_layer_2, scope=bwd_scope)
+                    gru_bwd_2_drop = tf.contrib.rnn.DropoutWrapper(gru_bwd_2,
+                                                                   input_keep_prob=self.gru_keep_prob)
+                    bwd2_out_r, _ = tf.nn.dynamic_rnn(gru_bwd_2_drop, self.bgru1_r,
+                                                      dtype=tf.float32, scope=bwd_scope)
+                    # Reverse to match fwd2_out
                     self.bwd2_out = tf.reverse(bwd2_out_r, axis=[1])
                 self.bgru2 = tf.concat([self.fwd2_out, self.bwd2_out], axis=2)
+                self.bgru2_r = tf.reverse(self.bgru2, axis=[1])
 
             # Bi-directional GRU Block3
             with tf.name_scope('GRU_Block3'):
                 gru_layer_3 = tf.contrib.rnn.GRUCell(**self.params['gru_layer3'])
-                gru_layer_3_drop = tf.contrib.rnn.DropoutWrapper(gru_layer_3, 
-                                                                 input_keep_prob=self.gru_keep_prob)
-                with tf.name_scope('fwd') as fwd_scope:
-                    self.fwd3_out, _ = tf.nn.dynamic_rnn(gru_layer_3_drop, self.bgru2,
+
+                with tf.name_scope('fwd') as fwd_scope, tf.device('/gpu:0') as device:
+                    gru_fwd_3 = DeviceCellWrapper(device, gru_layer_3, scope=fwd_scope)
+                    gru_fwd_3_drop = tf.contrib.rnn.DropoutWrapper(gru_fwd_3,
+                                                                   input_keep_prob=self.gru_keep_prob)
+                    self.fwd3_out, _ = tf.nn.dynamic_rnn(gru_fwd_3_drop, self.bgru2,
                                                          dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
-                with tf.name_scope('bwd') as bwd_scope:
-                    bgru2_r = tf.reverse(self.bgru2, axis=[1])
-                    bwd3_out_r, _ = tf.nn.dynamic_rnn(gru_layer_3_drop, bgru2_r, dtype=tf.float32,
+                with tf.name_scope('bwd') as bwd_scope, tf.device('/gpu:1') as device:
+                    gru_bwd_3 = DeviceCellWrapper(device, gru_layer_3, scope=bwd_scope)
+                    gru_bwd_3_drop = tf.contrib.rnn.DropoutWrapper(gru_bwd_3,
+                                                                   input_keep_prob=self.gru_keep_prob)
+                    bwd3_out_r, _ = tf.nn.dynamic_rnn(gru_bwd_3_drop, self.bgru2_r, dtype=tf.float32,
                                                       scope=bwd_scope)
                     # Reverse to match fwd1_out
                     self.bwd3_out = tf.reverse(bwd3_out_r, axis=[1])
@@ -128,24 +149,25 @@ class ProteinRNN:
 
             self.fc_keep_prob = tf.placeholder_with_default(1.0, shape=())
 
-            self.fc_1 = tf.layers.dense(self.reshape_context, **self.params['fc_1'])
-            self.drop_1 = tf.layers.dropout(self.fc_1, rate=self.fc_keep_prob)
-            self.fc_2 = tf.layers.dense(self.drop_1, **self.params['fc_2'])
-            self.drop_2 = tf.layers.dropout(self.fc_2, rate=self.fc_keep_prob)
+            with tf.device('/gpu:0') as device:
+                self.fc_1 = tf.layers.dense(self.reshape_context, **self.params['fc_1'])
+                self.drop_1 = tf.layers.dropout(self.fc_1, rate=self.fc_keep_prob)
+                self.fc_2 = tf.layers.dense(self.drop_1, **self.params['fc_2'])
+                self.drop_2 = tf.layers.dropout(self.fc_2, rate=self.fc_keep_prob)
+                
+                self.logits = tf.layers.dense(self.drop_2, **self.params['out'])
+                self.reshaped_logits = tf.reshape(self.logits, [-1, 700, 8])
+                self.y_proba = tf.nn.softmax(self.reshaped_logits)
+                self.y_pred = tf.argmax(self.y_proba, axis=2, name='y_pred')
             
-            self.logits = tf.layers.dense(self.drop_2, **self.params['out'])
-            self.reshaped_logits = tf.reshape(self.logits, [-1, 700, 8])
-            self.y_proba = tf.nn.softmax(self.reshaped_logits)
-            self.y_pred = tf.argmax(self.y_proba, axis=2, name='y_pred')
-            
-            y_label = tf.argmax(self.y, axis=2)
-            correct = tf.equal(y_label, self.y_pred)
+                y_label = tf.argmax(self.y, axis=2)
+                correct = tf.equal(y_label, self.y_pred)
 
-            self.accuracy = tf.reduce_mean(tf.cast(correct, tf.float32), name='accuracy')
+                self.accuracy = tf.reduce_mean(tf.cast(correct, tf.float32), name='accuracy')
 
-            self.seq_loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.y,
-                                                                logits=self.y_proba)
-            self.loss = tf.reduce_mean(self.seq_loss)
+                self.seq_loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.y,
+                                                                    logits=self.y_proba)
+                self.loss = tf.reduce_mean(self.seq_loss)
             self.train_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope.name)
 
     def _build_optimiser(self):
@@ -160,6 +182,9 @@ class ProteinRNN:
         n_iterations_per_epoch = data['X_train'].shape[0] // self.batch_size
         n_iterations_validation = data['y_valid'].shape[0] // self.valid_batch_size
         best_loss_valid = np.infty
+
+        gru_dropout = self.params['gru_dropout']
+        fc_dropout = self.params['fc_dropout']
 
         if restore_checkpoint and tf.train.checkpoint_exists(checkpoint_path):
             self.saver.restore(self.sess, checkpoint_path)
@@ -184,7 +209,13 @@ class ProteinRNN:
                 X_batch = X_train[start:end]
                 y_batch = y_train[start:end]
 
-                feed_dict = {self.X: X_batch, self.y: y_batch}
+                feed_dict = {
+                    self.X: X_batch,
+                    self.y: y_batch,
+                    self.gru_keep_prob: gru_dropout,
+                    self.fc_keep_prob: fc_dropout
+                }
+
                 _, loss_train = self.sess.run([self.training_op, self.loss],
                                               feed_dict=feed_dict)
                 
@@ -198,6 +229,8 @@ class ProteinRNN:
                     loss_train),
                 end="")
 
+            loss_valid_ = []
+            acc_valid_ = []
             for iteration in range(n_iterations_validation):
                 start = iteration * self.valid_batch_size
                 end = min((iteration + 1) * self.valid_batch_size, y_valid.shape[0])
@@ -210,23 +243,28 @@ class ProteinRNN:
                                                       feed_dict=feed_dict)
 
                 loss_valid = np.squeeze(loss_valid)
+                acc_valid = np.squeeze(acc_valid)
 
-                epochs_valid.append(epoch)
-                losses_valid.append(loss_valid)
-                accuracy_valid.append(acc_valid)
+                loss_valid_.append(loss_valid)
+                acc_valid_.append(acc_valid)
 
                 print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
                     iteration, n_iterations_validation,
                     iteration * 100 / n_iterations_validation),
                 end=" " * 10)
 
-            loss_valid = np.mean(loss_valid[:-1])
-            acc_valid = np.mean(acc_valid[:-1])
+            loss_valid = np.mean(loss_valid_)
+            acc_valid = np.mean(acc_valid_)
+
+            epochs_valid.append(epoch)
+            losses_valid.append(loss_valid)
+            accuracy_valid.append(acc_valid)
+
             print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{}".format(
                 epoch + 1, acc_valid * 100, loss_valid,
                 " (improved)" if loss_valid < best_loss_valid else ""))
 
-            if loss_valid < best_loss_val:
+            if loss_valid < best_loss_valid:
                 save_path = self.saver.save(self.sess, checkpoint_path)
                 best_loss_valid = loss_valid
                 n_since_save = 0
