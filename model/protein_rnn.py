@@ -223,11 +223,13 @@ class ProteinRNN:
                 epochs_train.append(epoch)
                 losses_train.append(loss_train)
             
-            print('\rIteration: {}/{} ({:.1f}%)  Loss: {:.3f}'.format(
+            train_loss_str = '\rIteration: {}/{} ({:.1f}%)  Loss: {:.3f}\n'.format(
                     iteration, n_iterations_per_epoch,
                     iteration * 100 / n_iterations_per_epoch,
-                    loss_train),
-                end="")
+                    loss_train)
+            with open('train_progress.txt', 'a') as file:
+                file.write(train_loss_str)
+            print(train_loss_str)
 
             loss_valid_ = []
             acc_valid_ = []
@@ -248,11 +250,6 @@ class ProteinRNN:
                 loss_valid_.append(loss_valid)
                 acc_valid_.append(acc_valid)
 
-                print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
-                    iteration, n_iterations_validation,
-                    iteration * 100 / n_iterations_validation),
-                end=" " * 10)
-
             loss_valid = np.mean(loss_valid_)
             acc_valid = np.mean(acc_valid_)
 
@@ -260,9 +257,12 @@ class ProteinRNN:
             losses_valid.append(loss_valid)
             accuracy_valid.append(acc_valid)
 
-            print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{}".format(
+            valid_loss_str = '\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{}\n'.format(
                 epoch + 1, acc_valid * 100, loss_valid,
-                " (improved)" if loss_valid < best_loss_valid else ""))
+                ' (improved)' if loss_valid < best_loss_valid else '')
+            with open('valid_progress.txt', 'a') as file:
+                file.write(valid_loss_str)
+            print(valid_loss_str)
 
             if loss_valid < best_loss_valid:
                 save_path = self.saver.save(self.sess, checkpoint_path)
