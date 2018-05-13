@@ -143,8 +143,9 @@ class ProteinRNN:
 
             self.accuracy = tf.reduce_mean(tf.cast(correct, tf.float32), name='accuracy')
 
-            self.loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.y,
+            self.seq_loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.y,
                                                                 logits=self.y_proba)
+            self.loss = tf.reduce_mean(self.seq_loss)
             self.train_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope.name)
 
     def _build_optimiser(self):
@@ -192,8 +193,8 @@ class ProteinRNN:
                 losses_train.append(loss_train)
             
             print('\rIteration: {}/{} ({:.1f}%)  Loss: {:.3f}'.format(
-                    i, n_iterations_per_epoch,
-                    i * 100 / n_iterations_per_epoch,
+                    iteration, n_iterations_per_epoch,
+                    iteration * 100 / n_iterations_per_epoch,
                     loss_train),
                 end="")
 
@@ -215,8 +216,8 @@ class ProteinRNN:
                 accuracy_valid.append(acc_valid)
 
                 print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
-                    i, n_iterations_validation,
-                    i* 100 / n_iterations_validation),
+                    iteration, n_iterations_validation,
+                    iteration * 100 / n_iterations_validation),
                 end=" " * 10)
 
             loss_valid = np.mean(loss_valid[:-1])
