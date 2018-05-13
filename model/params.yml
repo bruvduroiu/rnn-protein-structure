@@ -55,7 +55,6 @@ fc_dropout: 0.5
 
 out:
   units: 8
-  activation: !!python/name:tensorflow.python.ops.nn_ops.softmax ''
 
 # 22 labels
 inputs: ['A', 'C', 'E', 'D', 'G', 'F', 'I', 'H', 'K', 'M', 'L', 'N', 'Q', 'P', 'S', 'R', 'T', 'W', 'V', 'Y', 'X', 'NoSeq']
