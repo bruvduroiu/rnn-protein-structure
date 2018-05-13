@@ -16,7 +16,7 @@ def main():
     with tf.Session(config=config) as sess:
 
         # Form Model
-        protein_rnn = ProteinRNN(session=sess)
+        protein_rnn = ProteinRNN(session=sess, param_file='model/params_test.yml')
 
         # Train model
         protein_rnn.train(data=dataset_dict)

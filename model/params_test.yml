@@ -3,7 +3,7 @@ seq_length: 700
 n_amino: 22
 n_structures: 8
 train:
-  epochs: 200 
+  epochs: 1 
   batch_size: 128
 valid:
   batch_size: 32

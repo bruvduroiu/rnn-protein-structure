@@ -38,3 +38,4 @@ gradleBuild
 
 # Don't include datasets
 *.npy
+datasets/

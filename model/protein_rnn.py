@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 
 class ProteinRNN:
-    def __init__(self, sess=None, name='ProteinRNN', param_file='model/params.yml'):
+    def __init__(self, session=None, name='ProteinRNN', param_file='model/params.yml'):
         self.name = name
         self.params = self._load_params(param_file=param_file)
 
@@ -15,7 +15,7 @@ class ProteinRNN:
         self._build_graph()
         self._build_optimiser()
 
-        self.sess = sess or tf.Session()
+        self.sess = session or tf.Session()
         self.saver = tf.train.Saver()
 
     def _load_params(self, param_file='model/params.yml'):
@@ -37,7 +37,7 @@ class ProteinRNN:
     def _build_graph(self):
         with tf.variable_scope(self.name) as scope:
             self.X = tf.placeholder(tf.float32, [None, self.seq_length, self.n_amino])
-            self.y = tf.placeholder(tf.int32, [None, self.n_structures])
+            self.y = tf.placeholder(tf.int32, [None, self.seq_length, self.n_structures])
 
             X_embed_reshape = tf.reshape(self.X, [-1, 22])
             self.W_embedding = tf.layers.dense(X_embed_reshape, **self.params['embedding_layer'])
@@ -74,15 +74,15 @@ class ProteinRNN:
             with tf.name_scope('GRU_Block1'):
                 gru_layer_1 = tf.contrib.rnn.GRUCell(**self.params['gru_layer1'])
                 gru_layer_1_drop = tf.contrib.rnn.DropoutWrapper(gru_layer_1, 
-                                                                input_keep_prob=self.gru_keep_prob)
+                                                                 input_keep_prob=self.gru_keep_prob)
                 with tf.name_scope('fwd') as fwd_scope:
                     self.fwd1_out, _ = tf.nn.dynamic_rnn(gru_layer_1_drop, self.concat_cnn_bn,
-                                                        dtype=tf.float32, scope=fwd_scope)
+                                                         dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
                 with tf.name_scope('bwd') as bwd_scope:
                     concat_cnn_bn_r = tf.reverse(self.concat_cnn_bn, axis=[1])
                     bwd1_out_r, _ = tf.nn.dynamic_rnn(gru_layer_1_drop, concat_cnn_bn_r, dtype=tf.float32,
-                                                    scope=bwd_scope)
+                                                      scope=bwd_scope)
                     # Reverse to match fwd1_out
                     self.bwd1_out = tf.reverse(bwd1_out_r, axis=[1])
                 self.bgru1 = tf.concat([self.fwd1_out, self.bwd1_out], axis=2)
@@ -94,12 +94,12 @@ class ProteinRNN:
                                                                 input_keep_prob=self.gru_keep_prob)
                 with tf.name_scope('fwd') as fwd_scope:
                     self.fwd2_out, _ = tf.nn.dynamic_rnn(gru_layer_2_drop, self.bgru1,
-                                                        dtype=tf.float32, scope=fwd_scope)
+                                                         dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
                 with tf.name_scope('bwd') as bwd_scope:
                     bgru1_r = tf.reverse(self.bgru1, axis=[1])
                     bwd2_out_r, _ = tf.nn.dynamic_rnn(gru_layer_2_drop, bgru1_r, dtype=tf.float32,
-                                                    scope=bwd_scope)
+                                                      scope=bwd_scope)
                     # Reverse to match fwd1_out
                     self.bwd2_out = tf.reverse(bwd2_out_r, axis=[1])
                 self.bgru2 = tf.concat([self.fwd2_out, self.bwd2_out], axis=2)
@@ -108,7 +108,7 @@ class ProteinRNN:
             with tf.name_scope('GRU_Block3'):
                 gru_layer_3 = tf.contrib.rnn.GRUCell(**self.params['gru_layer3'])
                 gru_layer_3_drop = tf.contrib.rnn.DropoutWrapper(gru_layer_3, 
-                                                                input_keep_prob=self.gru_keep_prob)
+                                                                 input_keep_prob=self.gru_keep_prob)
                 with tf.name_scope('fwd') as fwd_scope:
                     self.fwd3_out, _ = tf.nn.dynamic_rnn(gru_layer_3_drop, self.bgru2,
                                                          dtype=tf.float32, scope=fwd_scope)
@@ -116,7 +116,7 @@ class ProteinRNN:
                 with tf.name_scope('bwd') as bwd_scope:
                     bgru2_r = tf.reverse(self.bgru2, axis=[1])
                     bwd3_out_r, _ = tf.nn.dynamic_rnn(gru_layer_3_drop, bgru2_r, dtype=tf.float32,
-                                                    scope=bwd_scope)
+                                                      scope=bwd_scope)
                     # Reverse to match fwd1_out
                     self.bwd3_out = tf.reverse(bwd3_out_r, axis=[1])
 
@@ -134,7 +134,14 @@ class ProteinRNN:
             self.drop_2 = tf.layers.dropout(self.fc_2, rate=self.fc_keep_prob)
             
             self.logits = tf.layers.dense(self.drop_2, **self.params['out'])
-            self.y_proba = tf.nn.softmax(self.logits)
+            self.reshaped_logits = tf.reshape(self.logits, [-1, 700, 8])
+            self.y_proba = tf.nn.softmax(self.reshaped_logits)
+            self.y_pred = tf.argmax(self.y_proba, axis=2, name='y_pred')
+            
+            y_label = tf.argmax(self.y, axis=2)
+            correct = tf.equal(y_label, self.y_pred)
+
+            self.accuracy = tf.reduce_mean(tf.cast(correct, tf.float32), name='accuracy')
 
             self.loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.y,
                                                                 logits=self.y_proba)
@@ -145,8 +152,103 @@ class ProteinRNN:
             optimiser = tf.train.AdamOptimizer()
             self.training_op = optimiser.minimize(self.loss, var_list=self.train_vars, name='training_op')
 
-    def train(self):
-        pass
+    def train(self, data, restore_checkpoint=False, checkpoint_path='tmp/checkpoints.ckpt'):
+        self.n_epochs = self.params['train']['epochs']
+        self.batch_size = self.params['train']['batch_size']
+        self.valid_batch_size = self.params['valid']['batch_size']
+        n_iterations_per_epoch = data['X_train'].shape[0] // self.batch_size
+        n_iterations_validation = data['y_valid'].shape[0] // self.valid_batch_size
+        best_loss_valid = np.infty
+
+        if restore_checkpoint and tf.train.checkpoint_exists(checkpoint_path):
+            self.saver.restore(self.sess, checkpoint_path)
+        else:
+            tf.global_variables_initializer().run(session=self.sess)
+
+        # Assumes a dictionary will be passed to the train function
+        X_train, y_train, X_test, y_test, X_valid, y_valid = data.values()
+
+        epochs_train = []
+        epochs_valid = []
+        losses_train = []
+        losses_valid = []
+        accuracy_valid = []
+        n_since_save = 0
+        EARLY_STOPPING_N = 10
+
+        for epoch in range(self.n_epochs):
+            for iteration in range(n_iterations_per_epoch):
+                start = iteration * self.batch_size
+                end = min((iteration + 1) * self.batch_size, y_train.shape[0])
+                X_batch = X_train[start:end]
+                y_batch = y_train[start:end]
+
+                feed_dict = {self.X: X_batch, self.y: y_batch}
+                _, loss_train = self.sess.run([self.training_op, self.loss],
+                                              feed_dict=feed_dict)
+                
+                loss_train = np.squeeze(loss_train)
+                epochs_train.append(epoch)
+                losses_train.append(loss_train)
+            
+            print('\rIteration: {}/{} ({:.1f}%)  Loss: {:.3f}'.format(
+                    i, n_iterations_per_epoch,
+                    i * 100 / n_iterations_per_epoch,
+                    loss_train),
+                end="")
+
+            for iteration in range(n_iterations_validation):
+                start = iteration * self.valid_batch_size
+                end = min((iteration + 1) * self.valid_batch_size, y_valid.shape[0])
+
+                X_batch = X_valid[start:end]
+                y_batch = y_valid[start:end]
+
+                feed_dict = {self.X: X_batch, self.y: y_batch}
+                loss_valid, acc_valid = self.sess.run([self.loss, self.accuracy],
+                                                      feed_dict=feed_dict)
+
+                loss_valid = np.squeeze(loss_valid)
+
+                epochs_valid.append(epoch)
+                losses_valid.append(loss_valid)
+                accuracy_valid.append(acc_valid)
+
+                print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
+                    i, n_iterations_validation,
+                    i* 100 / n_iterations_validation),
+                end=" " * 10)
+
+            loss_valid = np.mean(loss_valid[:-1])
+            acc_valid = np.mean(acc_valid[:-1])
+            print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{}".format(
+                epoch + 1, acc_valid * 100, loss_valid,
+                " (improved)" if loss_valid < best_loss_valid else ""))
+
+            if loss_valid < best_loss_val:
+                save_path = self.saver.save(self.sess, checkpoint_path)
+                best_loss_valid = loss_valid
+                n_since_save = 0
+            else:
+                n_since_save += 1
+
+            if n_since_save >= EARLY_STOPPING_N:
+                break
+        
+        train_loss_data = np.array([epochs_train, losses_train])
+        np.save('train_loss_data', train_loss_data)
+
+        valid_loss_data = np.array([epochs_train, losses_valid, accuracy_valid])
+        np.save('valid_loss_data', valid_loss_data)
+
+    def load(self, checkpoint_path='tmp/checkpoints.ckpt'):
+        # Restores session from last checkpoint
+        if tf.train.checkpoint_exists(checkpoint_path):
+            self.saver.restore(self.sess, checkpoint_path)
+            print('Checkpoint Restored')
+        else:
+            tf.global_variables_initializer().run(session=self.sess)
+            print('Could not restore. Variables re-initialized.')
 
     def predict(self):
         pass
