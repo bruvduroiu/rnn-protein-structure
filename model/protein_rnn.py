@@ -3,6 +3,8 @@ import yaml
 import numpy as np
 import tensorflow as tf
 
+from sklearn import metrics
+
 from model.rnn_utils import DeviceCellWrapper
 
 class ProteinRNN:
