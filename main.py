@@ -6,10 +6,10 @@ import tensorflow as tf
 from model.protein_rnn import ProteinRNN
 
 def main():
-    data_raw = np.load('datasets/cb513.npz')
+    data_raw = np.load('datasets/cullpdb_onlyseq_q3_6133.npz')
     dataset_dict = dict(data_raw.items())
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.log_device_placement = True

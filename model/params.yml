@@ -1,10 +1,10 @@
 ---
 seq_length: 700
-n_amino: 22
-n_structures: 8
+n_amino: 21
+n_structures: 3
 train:
   epochs: 200 
-  batch_size: 128
+  batch_size: 32 
 valid:
   batch_size: 32
 test:
@@ -61,9 +61,10 @@ fc_2:
 fc_dropout: 0.5
 
 out:
-  units: 8
+  units: 3
 
-# 22 labels
-inputs: ['A', 'C', 'E', 'D', 'G', 'F', 'I', 'H', 'K', 'M', 'L', 'N', 'Q', 'P', 'S', 'R', 'T', 'W', 'V', 'Y', 'X', 'NoSeq']
-labels: ['L', 'B', 'E', 'G', 'I', 'H', 'S', 'T','NoSeq']
+# 21 amino acid types 
+inputs: ['A', 'C', 'E', 'D', 'G', 'F', 'I', 'H', 'K', 'M', 'L', 'N', 'Q', 'P', 'S', 'R', 'T', 'W', 'V', 'Y', 'X']
+# 3 structure types
+labels: ['H', 'E', 'C']
 ...
