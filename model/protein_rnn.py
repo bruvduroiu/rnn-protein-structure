@@ -305,5 +305,30 @@ class ProteinRNN:
     def predict(self):
         pass
 
+    def eval(self, X_test, y_test):
+        target_names = self.params['labels']
+
+        feed_dict = {self.X: X_test, self.y: y_test}
+        predictions = self.sess.run([self.y_proba], feed_dict=feed_dict)
+
+        predictions = predictions[0]
+
+        return eval_classifier(y_test, predictions, target_names=target_names)
+
+    def eval_classifier(self, y_true, y_pred, target_names=None):
+        '''y_true and y_pred should be encoded as probailities eg one-hot for labels'''
+        y_true = np.argmax(y_true, axis=2).reshape((-1,))
+        y_pred = np.argmax(y_pred, axis=2).reshape((-1,))
+        print('{:=^80}'.format('Evaluation'))
+        accuracy = metrics.accuracy_score(y_true, y_pred)
+        print('Accuracy = %.3f' % accuracy)
+        print('{:-^80}'.format('Classification report'))
+        report = metrics.classification_report(y_true, y_pred, target_names=target_names)
+        print(report)
+        cm = metrics.confusion_matrix(y_true, y_pred)
+        print('{:-^80}'.format('Confusion Matrix'))
+        print(cm)
+        return accuracy, cm, report
+
 if __name__ == '__main__':
     p = ProteinRNN(param_file='params.yml')
