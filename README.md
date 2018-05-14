@@ -2,6 +2,8 @@
 
 Model tested on the [CB513 dataset](https://www.princeton.edu/~jzthree/datasets/ICML2014/).
 
+Note: This code is optimised to run on Tensorflow version 1.3.0.
+
 ## Motivation
 
 To build a RNN-based neural network model capable of predicting the secondary structure of proteins based on their amino-acid chains.
