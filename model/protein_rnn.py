@@ -313,7 +313,7 @@ class ProteinRNN:
 
         predictions = predictions[0]
 
-        return eval_classifier(y_test, predictions, target_names=target_names)
+        return self.eval_classifier(y_test, predictions, target_names=target_names)
 
     def eval_classifier(self, y_true, y_pred, target_names=None):
         '''y_true and y_pred should be encoded as probailities eg one-hot for labels'''
