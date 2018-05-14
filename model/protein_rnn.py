@@ -50,22 +50,22 @@ class ProteinRNN:
                 X_in = tf.reshape(self.W_embedding, [-1, 1, 700, 50])
 
             with tf.name_scope('CNN_Cascade'):
-                # Conv Block 1: [3 x 50] kernel size
-                with tf.device('/gpu:0'):
+                # Conv Block 1: [3 x 50] kernel size 
+                with tf.device('/cpu:0'):
                     self.conv1 = tf.layers.conv2d(X_in, **self.params['conv1'])
                 self.conv1_transpose = tf.transpose(self.conv1, perm=[0,2,1,3])
                 self.conv1_reshape = tf.reshape(self.conv1_transpose, [-1, 700, 64])
                 self.conv1_bn = tf.layers.batch_normalization(self.conv1_reshape)
 
                 # Conv Block 2: [7 x 50 kernel size]
-                with tf.device('/gpu:1'):
+                with tf.device('/cpu:0'):
                     self.conv2 = tf.layers.conv2d(X_in, **self.params['conv2'])
                 self.conv2_transpose = tf.transpose(self.conv2, perm=[0,2,1,3])
                 self.conv2_reshape = tf.reshape(self.conv2_transpose, [-1, 700, 64])
                 self.conv2_bn = tf.layers.batch_normalization(self.conv2_reshape)
 
                 # Conv Block 3: [11 x 50 kernel size]
-                with tf.device('/gpu:0'):
+                with tf.device('/cpu:0'):
                     self.conv3 = tf.layers.conv2d(X_in, **self.params['conv3'])
                 self.conv3_transpose = tf.transpose(self.conv3, perm=[0,2,1,3])
                 self.conv3_reshape = tf.reshape(self.conv2_transpose, [-1, 700, 64])
@@ -85,7 +85,7 @@ class ProteinRNN:
 
                 # Map forward and backward GRUs onto different devices
                 with tf.name_scope('fwd') as fwd_scope:
-                    with tf.device('/gpu:0') as device:
+                    with tf.device('/cpu:0') as device:
                         gru_fwd_1 = DeviceCellWrapper(device, gru_layer_1, scope=fwd_scope)
                     gru_fwd_1_drop = tf.contrib.rnn.DropoutWrapper(gru_fwd_1, 
                                                                    input_keep_prob=self.gru_keep_prob)
@@ -93,7 +93,7 @@ class ProteinRNN:
                                                          dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
                 with tf.name_scope('bwd') as bwd_scope:
-                    with tf.device('/gpu:1') as device:
+                    with tf.device('/cpu:0') as device:
                         gru_bwd_1 = DeviceCellWrapper(device, gru_layer_1, scope=bwd_scope)
                     gru_bwd_1_drop = tf.contrib.rnn.DropoutWrapper(gru_bwd_1,
                                                                    input_keep_prob=self.gru_keep_prob)
@@ -109,7 +109,7 @@ class ProteinRNN:
                 gru_layer_2 = tf.contrib.rnn.GRUCell(**self.params['gru_layer2'])
 
                 with tf.name_scope('fwd') as fwd_scope:
-                    with tf.device('/gpu:0') as device:
+                    with tf.device('/cpu:0') as device:
                         gru_fwd_2 = DeviceCellWrapper(device, gru_layer_2, scope=fwd_scope)
                     gru_fwd_2_drop = tf.contrib.rnn.DropoutWrapper(gru_fwd_2,
                                                                    input_keep_prob=self.gru_keep_prob)
@@ -117,7 +117,7 @@ class ProteinRNN:
                                                          dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
                 with tf.name_scope('bwd') as bwd_scope:
-                    with tf.device('/gpu:1') as device:
+                    with tf.device('/cpu:0') as device:
                         gru_bwd_2 = DeviceCellWrapper(device, gru_layer_2, scope=bwd_scope)
                     gru_bwd_2_drop = tf.contrib.rnn.DropoutWrapper(gru_bwd_2,
                                                                    input_keep_prob=self.gru_keep_prob)
@@ -133,7 +133,7 @@ class ProteinRNN:
                 gru_layer_3 = tf.contrib.rnn.GRUCell(**self.params['gru_layer3'])
 
                 with tf.name_scope('fwd') as fwd_scope:
-                    with tf.device('/gpu:0') as device:
+                    with tf.device('/cpu:0') as device:
                         gru_fwd_3 = DeviceCellWrapper(device, gru_layer_3, scope=fwd_scope)
                     gru_fwd_3_drop = tf.contrib.rnn.DropoutWrapper(gru_fwd_3,
                                                                    input_keep_prob=self.gru_keep_prob)
@@ -141,7 +141,7 @@ class ProteinRNN:
                                                          dtype=tf.float32, scope=fwd_scope)
                 # Feed in output backward
                 with tf.name_scope('bwd') as bwd_scope:
-                    with tf.device('/gpu:1') as device:
+                    with tf.device('/cpu:0') as device:
                         gru_bwd_3 = DeviceCellWrapper(device, gru_layer_3, scope=bwd_scope)
                     gru_bwd_3_drop = tf.contrib.rnn.DropoutWrapper(gru_bwd_3,
                                                                    input_keep_prob=self.gru_keep_prob)
@@ -158,7 +158,7 @@ class ProteinRNN:
 
             self.fc_keep_prob = tf.placeholder_with_default(1.0, shape=())
 
-            with tf.device('/gpu:0') as device:
+            with tf.device('/cpu:0') as device:
                 self.fc_1 = tf.layers.dense(self.reshape_context, **self.params['fc_1'])
                 self.drop_1 = tf.layers.dropout(self.fc_1, rate=self.fc_keep_prob)
                 self.fc_2 = tf.layers.dense(self.drop_1, **self.params['fc_2'])

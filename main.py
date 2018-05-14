@@ -1,19 +1,31 @@
 import os
 
+import click
 import numpy as np
 import tensorflow as tf
 
 from model.protein_rnn import ProteinRNN
 
-def main():
-    data_raw = np.load('datasets/cullpdb_onlyseq_q3_6133.npz')
+@click.command()
+@click.option('-d', '--data',
+               help='Dataset for training. Should have format \
+              (X_train, y_train, X_test, y_test, X_valid, y_valid).')
+@click.option('--use-gpu/--no-use-gpu', default=False,
+              help='Set this flag to enable GPU support')
+@click.option('--cuda-devices', default='0, 1',
+              help='CUDA Device indexes to expose to Tensorflow')
+@click.option('--log-device-placement/--no-log-device-placement',
+              default=False)
+def main(data, use_gpu, cuda_devices, log_device_placement):
+    data_raw = np.load(data)
     dataset_dict = dict(data_raw.items())
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
     config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.log_device_placement = True
-    config.allow_soft_placement = True
+    if use_gpu:
+        os.environ['CUDA_VISIBLE_DEVICES'] = cuda_devices 
+        config.gpu_options.allow_growth = True
+        config.log_device_placement = log_device_placement
+        config.allow_soft_placement = True
 
     with tf.Session(config=config) as sess:
 
